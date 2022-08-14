@@ -175,7 +175,7 @@ class SingleRingEnv(AbstractEnv):
         info = self._info(obs, action)
 
         info["dreward"] = reward
-        reward = reward.detach().item()
+        reward = reward.detach().cpu().item()
 
         return obs, reward, terminal, info
 

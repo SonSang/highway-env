@@ -48,9 +48,9 @@ class dVehicle:
                 vehicles_position[i] += vehicle.impact
                 vehicle.crashed = True
                 vehicle.impact = None
-            vehicle.position = vehicles_position[i].detach().numpy()
-            vehicle.heading = vehicles_heading[i].detach().item()
-            vehicle.speed = vehicles_speed[i].detach().item()
+            vehicle.position = vehicles_position[i].detach().cpu().numpy()
+            vehicle.heading = vehicles_heading[i].detach().cpu().item()
+            vehicle.speed = vehicles_speed[i].detach().cpu().item()
 
             vehicle.on_state_update()
 

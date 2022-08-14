@@ -77,4 +77,4 @@ class dContinuousAction(ContinuousAction):
                 "acceleration": 0,
                 "steering": utils.lmap(action[0], [-1, 1], self.steering_range)
             })
-        self.last_action = action.detach().numpy()
+        self.last_action = action.detach().cpu().numpy()
