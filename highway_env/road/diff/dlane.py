@@ -54,6 +54,10 @@ class dCircularLane(CircularLane):
         coords = th.tensor([longitudinal, lateral], dtype=position.dtype, device=position.device)
         return coords
 
+    def local_angle(self, heading: th.Tensor, long_offset: th.Tensor) -> th.Tensor:
+        """Compute non-normalised angle of heading to the lane."""
+        return wrap_to_pi(heading - self.heading_at(long_offset))
+
 def d_on_lane(lane: AbstractLane, position: th.Tensor, longitudinal: th.Tensor = None, lateral: th.Tensor = None, margin: float = 0):
     """
     Whether a given world position is on the lane. (Differentiable version)

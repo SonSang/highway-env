@@ -1,3 +1,4 @@
+from threading import local
 from typing import List
 from highway_env.vehicle.kinematics import Vehicle
 
@@ -89,3 +90,93 @@ class dVehicle:
                     vehicles_heading: th.Tensor,
                     vehicles_speed: th.Tensor) -> th.Tensor:
         return self.direction(vehicles_heading) * vehicles_speed
+
+    @classmethod
+    def destination(self, 
+                    vehicles: List[Vehicle],
+                    vehicles_position: th.Tensor) -> th.Tensor:
+        dest = vehicles_position.clone()
+        for i, vehicle in enumerate(vehicles):
+            if getattr(vehicle, "route", None):
+                last_lane_index = vehicle.route[-1]
+                last_lane_index = last_lane_index if last_lane_index[-1] is not None else (*last_lane_index[:-1], 0)
+                last_lane = vehicle.road.network.get_lane(last_lane_index)
+                dpos = last_lane.position(last_lane.length, 0)
+                dest[i] = th.tensor(dpos, device=vehicles_position.device, dtype=vehicles_position.dtype)
+        return dest
+
+    @classmethod
+    def destination_direction(self,
+                                vehicles: List[Vehicle],
+                                vehicles_position: th.Tensor) -> th.Tensor:
+        dest = self.destination(vehicles, vehicles_position)
+        if th.any(dest - vehicles_position):
+            return (dest - vehicles_position) / th.norm(dest - vehicles_position)
+        else:
+            return th.zeros_like(vehicles_position, device=vehicles_position.device, dtype= vehicles_position.dtype)
+
+    @classmethod
+    def lane_offset(self,
+                    vehicles: List[Vehicle],
+                    vehicles_position: th.Tensor,
+                    vehicles_heading: th.Tensor) -> th.Tensor:
+        num_vehicles = len(vehicles)
+        offset = th.zeros((num_vehicles, 3), device=vehicles_position.device, dtype=vehicles_position.dtype)
+        for i, vehicle in enumerate(vehicles):        
+            if vehicle.lane is not None:
+                local_coords = vehicle.lane.local_coordinates(vehicles_position[i])
+                long, lat = local_coords[0], local_coords[1]
+                ang = vehicle.lane.local_angle(vehicles_heading[i], long)
+                offset[i][0] = long
+                offset[i][1] = lat
+                offset[i][2] = ang
+        return offset
+
+    @classmethod
+    def to_dict(self,
+                vehicles: List[Vehicle], 
+                vehicles_position: th.Tensor,
+                vehicles_heading: th.Tensor,
+                vehicles_speed: th.Tensor,
+                origin_vehicle_id: int = None,
+                observe_intentions: bool = True) -> List[dict]:
+        num_vehicles = len(vehicles)
+
+        device = vehicles_position.device
+        dtype = vehicles_position.dtype
+
+        vehicles_velocity = self.velocity(vehicles_heading, vehicles_speed)
+        vehicles_direction = self.direction(vehicles_heading)
+        vehicles_destination_direction = self.destination_direction(vehicles, vehicles_position)
+        vehicles_lane_offset = self.lane_offset(vehicles, vehicles_position, vehicles_heading)
+
+        dicts = []
+        for i in range(num_vehicles):
+            d = {
+                'presence': 1,
+                'x': vehicles_position[i][0],
+                'y': vehicles_position[i][1],
+                'vx': vehicles_velocity[i][0],
+                'vy': vehicles_velocity[i][1],
+                'heading': vehicles_heading[i],
+                'cos_h': vehicles_direction[i][0],
+                'sin_h': vehicles_direction[i][1],
+                'cos_d': vehicles_destination_direction[i][0],
+                'sin_d': vehicles_destination_direction[i][1],
+                'long_off': vehicles_lane_offset[i][0],
+                'lat_off': vehicles_lane_offset[i][1],
+                'ang_off': vehicles_lane_offset[i][2],
+            }
+            if not observe_intentions:
+                d["cos_d"] = d["sin_d"] = th.zeros((1), device=device, dtype=dtype)
+            dicts.append(d)
+
+        if origin_vehicle_id:
+            origin_dict = dicts[origin_vehicle_id]
+            for i, d in enumerate(dicts):
+                # Do not normalize origin vehicle
+                if i == origin_vehicle_id:
+                    continue
+                for key in ['x', 'y', 'vx', 'vy']:
+                    d[key] -= origin_dict[key]
+        return dicts

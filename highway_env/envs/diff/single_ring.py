@@ -16,6 +16,7 @@ from highway_env.envs.common.action import action_factory, Action
 from highway_env.envs.common.observation import observation_factory
 from highway_env.envs.common.diff.daction import dContinuousAction
 from highway_env.road.diff.dlane import dCircularLane, d_on_lane
+from highway_env.envs.common.diff.dobservation import dKinematicObservation
 
 
 class SingleRingEnv(AbstractEnv):
@@ -25,7 +26,7 @@ class SingleRingEnv(AbstractEnv):
         config = super().default_config()
         config.update({
             "observation": {
-                "type": "Kinematics",
+                "type": "dKinematics",
                 "absolute": True,
                 "features_range": {"x": [-100, 100], "y": [-100, 100], "vx": [-15, 15], "vy": [-15, 15]},
             },
@@ -49,7 +50,14 @@ class SingleRingEnv(AbstractEnv):
         """
         Set the types and spaces of observation and action from config.
         """
-        self.observation_type = observation_factory(self, self.config["observation"])
+        try:
+            self.observation_type = observation_factory(self, self.config["observation"])
+        except:
+            if self.config["observation"]["type"] == "dKinematics":
+                self.observation_type = dKinematicObservation(self, **self.config["observation"])
+            else:
+                raise ValueError("Unknown observation type")
+
         try:
             self.action_type = action_factory(self, self.config["action"])
         except:
@@ -57,6 +65,7 @@ class SingleRingEnv(AbstractEnv):
                 self.action_type = dContinuousAction(self, **self.config["action"])
             else:
                 raise ValueError("Unknown action type")
+
         self.observation_space = self.observation_type.space()
         self.action_space = self.action_type.space()
 
@@ -88,6 +97,23 @@ class SingleRingEnv(AbstractEnv):
     def _reset(self) -> None:
         self._make_road()
         self._make_vehicles()
+
+    def reset(self) -> th.Tensor:
+        """
+        Reset the environment to it's initial configuration
+
+        :return: the observation of the reset state
+        """
+        self.update_metadata()
+        self.define_spaces()  # First, to set the controlled vehicle class depending on action space
+        self.time = self.steps = 0
+        self.done = False
+        self._reset()
+        self.define_spaces()  # Second, to link the obs and actions to the vehicles once the scene is created
+        return self.observation_type.observe(self.road.vehicles, 
+                                            self.road.road_object_position, 
+                                            self.road.road_object_heading,
+                                            self.road.road_object_speed)
 
     def _make_road(self) -> None:
         # Circle lanes: (s)outh/(e)ast/(n)orth/(w)est.
@@ -178,12 +204,17 @@ class SingleRingEnv(AbstractEnv):
         # but also return original tensors in [info] for future usage.
         self._simulate(action)
 
-        obs = self.observation_type.observe()
+        obs: th.Tensor = self.observation_type.observe(self.road.vehicles,
+                                            self.road.road_object_position,
+                                            self.road.road_object_heading,
+                                            self.road.road_object_speed)
         reward = self._reward(action)
         terminal = self._is_terminal()
         info = self._info(obs, action)
 
+        info["dobs"] = obs
         info["dreward"] = reward
+        obs = obs.detach().cpu().numpy()
         reward = reward.detach().cpu().item()
 
         return obs, reward, terminal, info
