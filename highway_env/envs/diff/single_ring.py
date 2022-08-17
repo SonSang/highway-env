@@ -207,7 +207,8 @@ class SingleRingEnv(AbstractEnv):
         obs: th.Tensor = self.observation_type.observe(self.road.vehicles,
                                             self.road.road_object_position,
                                             self.road.road_object_heading,
-                                            self.road.road_object_speed)
+                                            self.road.road_object_speed,
+                                            return_tensor=True)
         reward = self._reward(action)
         terminal = self._is_terminal()
         info = self._info(obs, action)

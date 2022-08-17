@@ -1,3 +1,4 @@
+from ctypes import Union
 from highway_env.envs.common.observation import KinematicObservation
 from typing import List, TYPE_CHECKING, Dict
 from gym import spaces
@@ -82,7 +83,8 @@ class dKinematicObservation(KinematicObservation):
                 vehicles: List[Vehicle], 
                 vehicles_position: th.Tensor,
                 vehicles_heading: th.Tensor,
-                vehicles_speed: th.Tensor) -> th.Tensor:
+                vehicles_speed: th.Tensor,
+                return_tensor: bool = False):
         device = vehicles_position.device
         dtype = vehicles_position.dtype
         
@@ -116,7 +118,7 @@ class dKinematicObservation(KinematicObservation):
             df = self.normalize_obs(df)
         # Fill missing rows
         if df.shape[0] < self.vehicles_count:
-            rows = th.zeros((self.vehicles_count - df.shape[0], len(self.features)), device=device, dtype=dtype)
+            rows = th.zeros((self.vehicles_count - df.shape[0], len(self.features)), device='cpu', dtype=dtype)
             df = pd.concat([df, pd.DataFrame(data=rows, columns=self.features)], ignore_index=True)
         # Reorder
         df = df[self.features]
@@ -132,4 +134,6 @@ class dKinematicObservation(KinematicObservation):
                     obs[i][j] = df.values[i][j].clone()
         if self.order == "shuffled":
             self.env.np_random.shuffle(obs[1:])
+        if not return_tensor:
+            obs = obs.detach().cpu().numpy()
         return obs
