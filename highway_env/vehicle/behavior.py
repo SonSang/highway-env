@@ -27,7 +27,7 @@ class IDMVehicle(ControlledVehicle):
     COMFORT_ACC_MIN = -5.0  # [m/s2]
     """Desired maximum deceleration."""
 
-    DISTANCE_WANTED = 5.0 + ControlledVehicle.LENGTH  # [m]
+    DISTANCE_WANTED = 1.0 + ControlledVehicle.LENGTH  # [m]
     """Desired jam distance to the front vehicle."""
 
     TIME_WANTED = 1.5  # [s]

@@ -2,6 +2,7 @@ from highway_env.road.lane import AbstractLane, CircularLane, LineType
 from highway_env.utils import wrap_to_pi, Vector, get_class_path, class_from_path
 
 from typing import List
+from highway_env.vehicle.kinematics import Vehicle
 
 import torch as th
 
@@ -33,15 +34,38 @@ class dCircularLane(CircularLane):
             priority)
 
     def heading_at(self, longitudinal: th.Tensor) -> th.Tensor:
+        if not isinstance(longitudinal, th.Tensor):
+            return super().heading_at(longitudinal)
+
         phi = self.direction * longitudinal / self.radius + self.start_phase
         psi = phi + th.pi/2 * self.direction
         return psi
 
     def local_coordinates(self, position: th.Tensor) -> th.Tensor:
+        if not isinstance(position, th.Tensor):
+            return super().local_coordinates(position)
+
         delta = position - self.center
         phi = th.arctan2(delta[1], delta[0])
         phi = self.start_phase + wrap_to_pi(phi - self.start_phase)
         r = th.norm(delta)
         longitudinal = self.direction*(phi - self.start_phase)*self.radius
         lateral = self.direction*(self.radius - r)
-        return longitudinal, lateral
+        coords = th.tensor([longitudinal, lateral], dtype=position.dtype, device=position.device)
+        return coords
+
+def d_on_lane(lane: AbstractLane, position: th.Tensor, longitudinal: th.Tensor = None, lateral: th.Tensor = None, margin: float = 0):
+    """
+    Whether a given world position is on the lane. (Differentiable version)
+
+    :param position: a world position [m]
+    :param longitudinal: (optional) the corresponding longitudinal lane coordinate, if known [m]
+    :param lateral: (optional) the corresponding lateral lane coordinate, if known [m]
+    :param margin: (optional) a supplementary margin around the lane width
+    :return: is the position on the lane? (0~1) value, 1 means on the lane
+    """
+    if longitudinal is None or lateral is None:
+        longitudinal, lateral = lane.local_coordinates(position)
+    lateral_is_on = th.sigmoid(lane.width_at(longitudinal) / 2 + margin - th.abs(lateral))
+    longitudinal_is_on = th.sigmoid(longitudinal + lane.VEHICLE_LENGTH) * th.sigmoid(lane.length + lane.VEHICLE_LENGTH - longitudinal)
+    return lateral_is_on * longitudinal_is_on

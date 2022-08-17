@@ -15,6 +15,8 @@ from highway_env.diff.dutils import d_not_zero, d_wrap_to_pi
 from highway_env.road.lane import AbstractLane
 from highway_env.vehicle.diff.dkinematics import dVehicle
 
+MAX_FRONT_DIST = 1e6
+
 class dIDM:
     """
     A class that accepts pytorch Tensor that describes states of IDM vehicles
@@ -49,7 +51,7 @@ class dIDM:
         # Find position at the target lane and expected heading.
         # ================================ Non-parallelized block
         lane_coords = th.zeros((num_vehicles, 2), device=device, dtype=dtype)
-        lane_next_coords = th.zeros((num_vehicles, 2), device=device, dtype=dtype)
+        lane_next_coords = th.zeros((num_vehicles, 1), device=device, dtype=dtype)
         lane_future_heading = th.zeros((num_vehicles, 1), device=device, dtype=dtype)
 
         for i, vehicle in enumerate(vehicles):
@@ -66,7 +68,7 @@ class dIDM:
         non_zero_vehicles_speed = d_not_zero(vehicles_speed)
 
         # Lateral position control
-        lateral_speed_command = - vehicles_kp_lateral * lane_coords[:, 1]
+        lateral_speed_command = - vehicles_kp_lateral * lane_coords[:, 1].unsqueeze(-1)
         # Lateral speed to heading
         heading_command = th.arcsin(th.clip(lateral_speed_command / non_zero_vehicles_speed, -1, 1))
         heading_ref = lane_future_heading + th.clip(heading_command, -th.pi/4, th.pi/4)
@@ -150,23 +152,40 @@ class dIDM:
         front_vehicles_speed = th.zeros((num_vehicles, 1), device=device, dtype=dtype)
         front_vehicles_heading = th.zeros((num_vehicles, 1), device=device, dtype=dtype)
 
+        # Potentially front vehicles (changing road situation)
+        p_front_vehicles_distance = th.zeros((num_vehicles, 1), device=device, dtype=dtype)
+        p_front_vehicles_speed = th.zeros((num_vehicles, 1), device=device, dtype=dtype)
+        p_front_vehicles_heading = th.zeros((num_vehicles, 1), device=device, dtype=dtype)
+
         for i, vehicle in enumerate(vehicles):
             if not isinstance(vehicle, IDMVehicle):
                 continue
 
             front_id, _ = road.neighbour_vehicles(vehicle)
-            if front_id is not None:
-                distance = dIDM.lane_distance_to(vehicles_position[i], vehicles_position[front_id], vehicle.lane)
-                front_vehicles_distance[i] = distance
+            if front_id is None:
+                front_vehicles_distance[i] = MAX_FRONT_DIST
+            else:
+                front_vehicles_distance[i] = dIDM.lane_distance_to(vehicles_position[i], vehicles_position[front_id], vehicle.lane)
                 front_vehicles_speed[i] = vehicles_speed[front_id]
                 front_vehicles_heading[i] = vehicles_heading[front_id]
+
+            if vehicle.lane_index != vehicle.target_lane_index:
+                p_front_id, _ = road.neighbour_vehicles(vehicle, vehicle.target_lane_index)
+                if p_front_id is None:
+                    p_front_vehicles_distance[i] = MAX_FRONT_DIST
+                else:
+                    p_front_vehicles_distance[i] = dIDM.lane_distance_to(vehicles_position[i], vehicles_position[p_front_id], vehicle.lane)
+                    p_front_vehicles_speed[i] = vehicles_speed[p_front_id]
+                    p_front_vehicles_heading[i] = vehicles_heading[p_front_id]
+            else:
+                p_front_vehicles_distance[i] = MAX_FRONT_DIST
 
         # Compute acceleration
         # ================================ Parallelized block
         non_zero_target_speed = d_not_zero(vehicles_target_speed)
         ego_target_speed = th.abs(non_zero_target_speed)
         acceleration = vehicles_comfort_acc_max * (
-                1 - th.pow(th.max(vehicles_speed, th.zeros_like(vehicles_speed)) / ego_target_speed, vehicles_delta))
+                1 - th.pow(th.max(vehicles_speed, th.zeros_like(vehicles_speed)) / ego_target_speed, vehicles_delta))        
 
         gap = self.desired_gap(
                     vehicles_distance_wanted,
@@ -178,6 +197,19 @@ class dIDM:
                     front_vehicles_heading,
                     front_vehicles_speed
                 )
-        acceleration -= vehicles_comfort_acc_max * \
+        p_gap = self.desired_gap(
+                    vehicles_distance_wanted,
+                    vehicles_time_wanted,
+                    vehicles_comfort_acc_max,
+                    vehicles_comfort_acc_min,
+                    vehicles_heading,
+                    vehicles_speed,
+                    p_front_vehicles_heading,
+                    p_front_vehicles_speed
+                )
+        acceleration_0 = acceleration - vehicles_comfort_acc_max * \
             th.pow(gap / d_not_zero(front_vehicles_distance), 2)
+        acceleration_1 = acceleration - vehicles_comfort_acc_max * \
+            th.pow(p_gap / d_not_zero(p_front_vehicles_distance), 2)
+        acceleration = th.min(acceleration_0, acceleration_1)
         return acceleration

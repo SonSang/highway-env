@@ -147,6 +147,9 @@ class dRoad(Road):
         dict['ego'] = ego_list
         return dict
 
+    def vehicle_act(self, vehicle: Vehicle, action):
+        vehicle.action = action
+
     def act(self) -> None:
         """
         Decide action of every vehicle in parallelized way 
@@ -222,7 +225,7 @@ class dRoad(Road):
             action = {}
             action['steering'] = self.actions[i][0].detach().item()
             action['acceleration'] = self.actions[i][1].detach().item()
-            vehicle.act(action)
+            self.vehicle_act(vehicle, action)
 
     def step(self, dt: float):
         """

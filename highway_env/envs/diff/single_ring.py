@@ -15,6 +15,7 @@ import torch as th
 from highway_env.envs.common.action import action_factory, Action
 from highway_env.envs.common.observation import observation_factory
 from highway_env.envs.common.diff.daction import dContinuousAction
+from highway_env.road.diff.dlane import dCircularLane, d_on_lane
 
 
 class SingleRingEnv(AbstractEnv):
@@ -40,6 +41,7 @@ class SingleRingEnv(AbstractEnv):
             "radius": 36.6,     # 230m circumference
             "num_vehicles": 22, # 22 cars
             "observer_mode": False,
+            "no_negative_speed": True,
         })
         return config
 
@@ -69,9 +71,14 @@ class SingleRingEnv(AbstractEnv):
         avg_speed /= len(self.road.vehicles)
         avg_speed /= max_speed
 
-        reward = avg_speed + self.config["collision_reward"] * self.vehicle.crashed
-        reward = th.tensor([0], dtype=self.road.torch_dtype, device=self.road.torch_device) \
-                     if not self.vehicle.on_road else reward
+        # Ignore negative reward from crash, as it is non-differentiable
+        # And also, since the episode ends when there is crash, we do not have to take care of it here
+        reward = avg_speed # + self.config["collision_reward"] * self.vehicle.crashed
+
+        # Use differentiable [on_lane] to find out if the ego vehicle is on the lane
+        ego_vehicle_position = self.road.road_object_position[self.vehicle_id]
+        on_lane = d_on_lane(self.vehicle.lane, ego_vehicle_position)
+        reward = reward * on_lane
         return reward
 
     def _is_terminal(self) -> bool:
@@ -93,24 +100,23 @@ class SingleRingEnv(AbstractEnv):
 
         # South to East
         net.add_lane("s", "e",
-                        CircularLane(center, radius, np.deg2rad(90), np.deg2rad(0),
+                        dCircularLane(center, radius, np.deg2rad(90), np.deg2rad(0),
                                     clockwise=False, line_types=line))
         # East to North
         net.add_lane("e", "n",
-                        CircularLane(center, radius, np.deg2rad(0), np.deg2rad(-90),
+                        dCircularLane(center, radius, np.deg2rad(0), np.deg2rad(-90),
                                     clockwise=False, line_types=line))
         # North to West
         net.add_lane("n", "w",
-                        CircularLane(center, radius, np.deg2rad(-90), np.deg2rad(-180),
+                        dCircularLane(center, radius, np.deg2rad(-90), np.deg2rad(-180),
                                     clockwise=False, line_types=line))
         # West to South
         net.add_lane("w", "s",
-                        CircularLane(center, radius, np.deg2rad(180), np.deg2rad(90),
+                        dCircularLane(center, radius, np.deg2rad(180), np.deg2rad(90),
                                     clockwise=False, line_types=line))
 
-        road = dRoad(network=net, np_random=self.np_random, record_history=self.config["show_trajectories"])
-        self.road = road
-
+        self.road = dRoad(network=net, np_random=self.np_random, record_history=self.config["show_trajectories"])
+        
     def _make_vehicles(self) -> None:
         """
         Populate a road with several vehicles on the highway, as well as ego-vehicles.
@@ -131,6 +137,7 @@ class SingleRingEnv(AbstractEnv):
         
         self.road.vehicles.append(ego_vehicle)
         self.vehicle = ego_vehicle
+        self.vehicle_id = len(self.road.vehicles) - 1
 
         # Incoming vehicle
         other_vehicles_type = utils.class_from_path(self.config["other_vehicles_type"])
@@ -146,6 +153,8 @@ class SingleRingEnv(AbstractEnv):
                                                        ("e", "n", 0),
                                                        longitudinal=start + unit_longitudinal * i,
                                                        speed=0)      # 8.33m/sec = 30km/h
+            if self.config["no_negative_speed"]:
+                vehicle.MIN_SPEED = 0.0
             vehicle.target_speed = 8.33
             vehicle.randomize_behavior()
             self.road.vehicles.append(vehicle)

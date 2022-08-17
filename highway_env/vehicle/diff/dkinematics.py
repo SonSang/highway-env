@@ -32,14 +32,14 @@ class dVehicle:
                             vehicles_max_speed,
                             vehicles_min_speed)
 
-        delta_f = vehicles_action[:,0]
+        delta_f = vehicles_action[:,[0]]
         beta = th.arctan(1 / 2 * th.tan(delta_f))
         v = vehicles_speed * th.cat([th.cos(vehicles_heading + beta),
                                         th.sin(vehicles_heading + beta)], dim=1)
         
         vehicles_position += v * dt
         vehicles_heading += vehicles_speed * th.sin(beta) / (vehicles_length / 2) * dt
-        vehicles_speed += vehicles_action[:,1] * dt
+        vehicles_speed += vehicles_action[:,[1]] * dt
 
         # ===================== Non-differentiable block
         # Apply updated position, heading, speed to each vehicle
