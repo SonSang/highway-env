@@ -45,7 +45,8 @@ class dCircularLane(CircularLane):
         if not isinstance(position, th.Tensor):
             return super().local_coordinates(position)
 
-        delta = position - self.center
+        th_center = th.tensor(self.center, dtype=position.dtype, device=position.device)
+        delta = position - th_center
         phi = th.arctan2(delta[1], delta[0])
         phi = self.start_phase + wrap_to_pi(phi - self.start_phase)
         r = th.norm(delta)
